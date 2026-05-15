@@ -24,7 +24,6 @@ from vllm.model_executor.models.interfaces import (
     SupportsPP,
 )
 from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.multimodal.cache import BaseMultiModalProcessorCache
 from vllm.multimodal.inputs import MultiModalFieldConfig, MultiModalKwargsItems
 from vllm.multimodal.parse import (
     ImageEmbeddingItems,
@@ -36,6 +35,7 @@ from vllm.multimodal.processing import (
     BaseDummyInputsBuilder,
     BaseMultiModalProcessor,
     BaseProcessingInfo,
+    InputProcessingContext,
     PromptIndexTargets,
     PromptInsertion,
     PromptUpdate,
@@ -264,8 +264,18 @@ class PrismaticProjector(nn.Module):
 
 
 class OpenVLAProcessingInfo(BaseProcessingInfo):
+    def __init__(self, ctx: InputProcessingContext) -> None:
+        super().__init__(ctx)
+        self.hf_processor = OpenVLAProcessor(
+            tokenizer=self.get_tokenizer(),
+            image_size=self.get_hf_config().image_sizes[0],
+        )
+
     def get_hf_config(self) -> OpenVLAConfig:
         return self.ctx.get_hf_config(OpenVLAConfig)
+
+    def get_hf_processor(self) -> OpenVLAProcessor:
+        return self.hf_processor
 
     def get_supported_mm_limits(self) -> Mapping[str, int | None]:
         return {"image": 1}
@@ -324,19 +334,6 @@ class OpenVLAMultiModalProcessor(BaseMultiModalProcessor[OpenVLAProcessingInfo])
     channels 0-2 are DINOv2-normalized and channels 3-5 are SigLIP-normalized.
     """
 
-    def __init__(
-        self,
-        info: OpenVLAProcessingInfo,
-        dummy_inputs: BaseDummyInputsBuilder[OpenVLAProcessingInfo],
-        *,
-        cache: BaseMultiModalProcessorCache | None = None,
-    ) -> None:
-        super().__init__(info, dummy_inputs, cache=cache)
-        self.hf_processor = OpenVLAProcessor(
-            tokenizer=self.info.get_tokenizer(),
-            image_size=self.info.get_hf_config().image_sizes[0],
-        )
-
     def _call_hf_processor(
         self,
         prompt: str,
@@ -344,7 +341,8 @@ class OpenVLAMultiModalProcessor(BaseMultiModalProcessor[OpenVLAProcessingInfo])
         mm_kwargs: Mapping[str, object],
         tok_kwargs: Mapping[str, object],
     ) -> BatchFeature:
-        return self.hf_processor(
+        processor = self.info.get_hf_processor()
+        return processor(
             prompt,
             images=mm_data.get("images"),
             tok_kwargs=tok_kwargs,

@@ -44,7 +44,10 @@ from vllm.multimodal.processing import (
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs import OpenVLAConfig
-from vllm.transformers_utils.processors.openvla import OpenVLAProcessor
+from vllm.transformers_utils.processors.openvla import (
+    OpenVLAImageProcessor,
+    OpenVLAProcessor,
+)
 from vllm.utils.tensor_schema import TensorSchema, TensorShape
 from vllm.utils.torch_utils import set_default_torch_dtype
 
@@ -267,14 +270,16 @@ class OpenVLAProcessingInfo(BaseProcessingInfo):
     def __init__(self, ctx: InputProcessingContext) -> None:
         super().__init__(ctx)
         self.hf_processor = OpenVLAProcessor(
+            image_processor=OpenVLAImageProcessor(
+                image_size=self.get_hf_config().image_sizes[0],
+            ),
             tokenizer=self.get_tokenizer(),
-            image_size=self.get_hf_config().image_sizes[0],
         )
 
     def get_hf_config(self) -> OpenVLAConfig:
         return self.ctx.get_hf_config(OpenVLAConfig)
 
-    def get_hf_processor(self) -> OpenVLAProcessor:
+    def get_hf_processor(self, **kwargs: object) -> OpenVLAProcessor:
         return self.hf_processor
 
     def get_supported_mm_limits(self) -> Mapping[str, int | None]:
@@ -333,20 +338,6 @@ class OpenVLAMultiModalProcessor(BaseMultiModalProcessor[OpenVLAProcessingInfo])
     normalizations. The processor exposes this as one 6-channel tensor:
     channels 0-2 are DINOv2-normalized and channels 3-5 are SigLIP-normalized.
     """
-
-    def _call_hf_processor(
-        self,
-        prompt: str,
-        mm_data: Mapping[str, object],
-        mm_kwargs: Mapping[str, object],
-        tok_kwargs: Mapping[str, object],
-    ) -> BatchFeature:
-        processor = self.info.get_hf_processor()
-        return processor(
-            prompt,
-            images=mm_data.get("images"),
-            tok_kwargs=tok_kwargs,
-        )
 
     def _get_mm_fields_config(
         self,

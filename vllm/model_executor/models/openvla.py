@@ -41,7 +41,6 @@ from vllm.multimodal.processing import (
     PromptUpdate,
     PromptUpdateDetails,
 )
-from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs import OpenVLAConfig
 from vllm.transformers_utils.processors.openvla import (
@@ -49,7 +48,6 @@ from vllm.transformers_utils.processors.openvla import (
     OpenVLAProcessor,
 )
 from vllm.utils.tensor_schema import TensorSchema, TensorShape
-from vllm.utils.torch_utils import set_default_torch_dtype
 
 from .module_mapping import MultiModelKeys
 from .utils import AutoWeightsLoader, init_vllm_registered_model, maybe_prefix
@@ -119,17 +117,9 @@ class PrismaticVisionBackbone(nn.Module):
             )
 
         self.image_size = image_sizes[0]
-        self.timm_model_ids = timm_model_ids
-        self.timm_override_act_layers = timm_override_act_layers
         self.use_fused_vision_backbone = use_fused_vision_backbone
 
         self.embed_dim = 2176 if use_fused_vision_backbone else 1024
-        self.dinov2_featurizer: nn.Module | None = None
-        self.siglip_featurizer: nn.Module | None = None
-
-    def init_timm_models(self) -> None:
-        if self.dinov2_featurizer is not None:
-            return
 
         try:
             import timm
@@ -139,33 +129,24 @@ class PrismaticVisionBackbone(nn.Module):
                 "used timm==0.9.10."
             ) from e
 
-        with set_default_torch_dtype(torch.float16):
-            self.dinov2_featurizer = timm.create_model(
-                self.timm_model_ids[0],
+        self.dinov2_featurizer = timm.create_model(
+            timm_model_ids[0],
+            pretrained=False,
+            num_classes=0,
+            img_size=self.image_size,
+            act_layer=timm_override_act_layers[0],
+        )
+        self.siglip_featurizer = (
+            timm.create_model(
+                timm_model_ids[1],
                 pretrained=False,
                 num_classes=0,
                 img_size=self.image_size,
-                act_layer=self.timm_override_act_layers[0],
+                act_layer=timm_override_act_layers[1],
             )
-
-            if self.use_fused_vision_backbone:
-                self.siglip_featurizer = timm.create_model(
-                    self.timm_model_ids[1],
-                    pretrained=False,
-                    num_classes=0,
-                    img_size=self.image_size,
-                    act_layer=self.timm_override_act_layers[1],
-                )
-
-        self.dinov2_featurizer = self.dinov2_featurizer.to(
-            device=current_platform.device_type,
-            dtype=torch.get_default_dtype(),
+            if use_fused_vision_backbone
+            else None
         )
-        if self.siglip_featurizer is not None:
-            self.siglip_featurizer = self.siglip_featurizer.to(
-                device=current_platform.device_type,
-                dtype=torch.get_default_dtype(),
-            )
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         if self.dinov2_featurizer is None:
@@ -396,8 +377,6 @@ class OpenVLAMultiModalProcessor(BaseMultiModalProcessor[OpenVLAProcessingInfo])
 class OpenVLAForActionPrediction(nn.Module, SupportsMultiModal, SupportsPP):
     """OpenVLA wrapper with vLLM language-model execution wired in."""
 
-    embed_input_ids = SupportsMultiModal.embed_input_ids
-
     @classmethod
     def get_placeholder_str(cls, modality: str, i: int) -> str | None:
         if modality.startswith("image"):
@@ -515,8 +494,6 @@ class OpenVLAForActionPrediction(nn.Module, SupportsMultiModal, SupportsPP):
         return num_vision_tokens
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        self.vision_backbone.init_timm_models()
-
         def maybe_rename_vision_weights(
             weights: Iterable[tuple[str, torch.Tensor]],
         ) -> Iterable[tuple[str, torch.Tensor]]:

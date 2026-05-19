@@ -345,6 +345,9 @@ class OpenVLAMultiModalProcessor(BaseMultiModalProcessor[OpenVLAProcessingInfo])
         hf_config = self.info.get_hf_config()
         image_token_id = hf_config.image_token_index
 
+        tokenizer = self.info.get_tokenizer()
+        bos_token_id = tokenizer.bos_token_id
+
         def get_insertion(item_idx: int) -> PromptUpdateDetails[list[int]]:
             images = mm_items.get_items(
                 "image", (ImageEmbeddingItems, ImageProcessorItems)
@@ -367,7 +370,9 @@ class OpenVLAMultiModalProcessor(BaseMultiModalProcessor[OpenVLAProcessingInfo])
         return [
             PromptInsertion(
                 modality="image",
-                target=PromptIndexTargets.start(),
+                target=PromptIndexTargets.prefix(
+                    [bos_token_id] if bos_token_id is not None else []
+                ),
                 insertion=get_insertion,
             )
         ]

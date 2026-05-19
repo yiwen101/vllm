@@ -180,7 +180,7 @@ def test_openvla_processing_info_token_counts() -> None:
     }
 
 
-def test_openvla_prompt_update_inserts_image_tokens_at_start() -> None:
+def test_openvla_prompt_update_inserts_image_tokens_after_bos() -> None:
     processor = _make_processor()
     image = Image.new("RGB", (640, 480), color=(255, 255, 255))
     mm_items = MultiModalDataItems({"image": ImageProcessorItems([image])})
@@ -198,11 +198,7 @@ def test_openvla_prompt_update_inserts_image_tokens_at_start() -> None:
     assert [
         (match.start_idx, match.end_idx)
         for match in resolved.iter_matches([1, 10, 11], _FakeTokenizer())
-    ] == [(0, 0)]
-    assert [
-        (match.start_idx, match.end_idx)
-        for match in resolved.iter_matches([], _FakeTokenizer())
-    ] == [(0, 0)]
+    ] == [(1, 1)]
     assert content.full == [32000] * 256
 
     is_embed = content.is_embed(None, content.full)
